@@ -41,9 +41,6 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
 
                           if SiteSetting.oauth2_send_auth_header? &&
                                SiteSetting.oauth2_send_auth_body?
-                            # For maximum compatibility we include both header and body auth by default
-                            # This is a little unusual, and utilising multiple authentication methods
-                            # is technically disallowed by the spec (RFC2749 Section 5.2)
                             opts[:client_options][:auth_scheme] = :request_body
                             opts[:token_params] = {
                               headers: {
@@ -67,8 +64,8 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
                                                { bodies: true, formatter: OAuth2FaradayFormatter }
                             end
 
-                            builder.request :url_encoded # form-encode POST params
-                            builder.adapter FinalDestination::FaradayAdapter # make requests with FinalDestination::HTTP
+                            builder.request :url_encoded
+                            builder.adapter FinalDestination::FaradayAdapter
                           end
                         }
   end
@@ -109,35 +106,31 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
   def json_walk(result, user_json, prop, custom_path: nil)
     path = custom_path || SiteSetting.public_send("oauth2_json_#{prop}_path")
     if path.present?
-      #this.[].that is the same as this.that, allows for both this[0].that and this.[0].that path styles
       path = path.gsub(".[].", ".").gsub(".[", "[")
       segments = parse_segments(path)
       val = walk_path(user_json, segments)
-      # [] should be nil, false should be false
       result[prop] = val.presence || (val == [] ? nil : val)
     end
   end
 
   def parse_segments(path)
-    segments = [+""]
+    segments = [+""] 
     quoted = false
     escaped = false
 
-    path
-      .split("")
-      .each do |char|
-        next_char_escaped = false
-        if !escaped && (char == '"')
-          quoted = !quoted
-        elsif !escaped && !quoted && (char == ".")
-          segments.append +""
-        elsif !escaped && (char == '\\')
-          next_char_escaped = true
-        else
-          segments.last << char
-        end
-        escaped = next_char_escaped
+    path.split("").each do |char|
+      next_char_escaped = false
+      if !escaped && (char == '"')
+        quoted = !quoted
+      elsif !escaped && !quoted && (char == ".")
+        segments.append +"" 
+      elsif !escaped && (char == '\\')
+        next_char_escaped = true
+      else
+        segments.last << char
       end
+      escaped = next_char_escaped
+    end
 
     segments
   end
@@ -157,20 +150,15 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
 
     log <<-LOG
       user_json request: #{user_json_method} #{user_json_url}
-
       request headers: #{headers}
-
       response status: #{user_json_response.status}
-
       response body:
       #{user_json_response.body}
     LOG
 
     if user_json_response.status == 200
       user_json = JSON.parse(user_json_response.body)
-
       log("user_json:\n#{user_json.to_yaml}")
-
       result = {}
       if user_json.present?
         json_walk(result, user_json, :user_id)
@@ -206,15 +194,11 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
   def after_authenticate(auth, existing_account: nil)
     log <<-LOG
       after_authenticate response:
-
       creds:
       #{auth["credentials"].to_hash.to_yaml}
-
       uid: #{auth["uid"]}
-
       info:
       #{auth["info"].to_hash.to_yaml}
-
       extra:
       #{auth["extra"].to_hash.to_yaml}
     LOG
@@ -222,14 +206,10 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
     if SiteSetting.oauth2_fetch_user_details? && SiteSetting.oauth2_user_json_url.present?
       if fetched_user_details = fetch_user_details(auth["credentials"]["token"], auth["uid"])
         auth["uid"] = fetched_user_details[:user_id] if fetched_user_details[:user_id]
-        auth["info"]["nickname"] = fetched_user_details[:username] if fetched_user_details[
-          :username
-        ]
+        auth["info"]["nickname"] = fetched_user_details[:username] if fetched_user_details[:username]
         auth["info"]["image"] = fetched_user_details[:avatar] if fetched_user_details[:avatar]
         %w[name email email_verified].each do |property|
-          auth["info"][property] = fetched_user_details[property.to_sym] if fetched_user_details[
-            property.to_sym
-          ]
+          auth["info"][property] = fetched_user_details[property.to_sym] if fetched_user_details[property.to_sym]
         end
 
         DiscoursePluginRegistry.oauth2_basic_additional_json_paths.each do |detail|
@@ -250,6 +230,11 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
         result.failed_reason = I18n.t("login.authenticator_error_fetch_user_details")
         return result
       end
+    end
+
+    # --- PKCE: Clear the stored code verifier from the session ---
+    if auth["rack.session"] && auth["rack.session"]["oauth2_code_verifier"]
+      auth["rack.session"].delete("oauth2_code_verifier")
     end
 
     super(auth, existing_account: existing_account)

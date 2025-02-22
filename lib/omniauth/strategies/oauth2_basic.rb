@@ -29,9 +29,31 @@ class OmniAuth::Strategies::Oauth2Basic < ::OmniAuth::Strategies::OAuth2
   end
 
   def recurse(obj, keys)
-    return nil if !obj
+    return nil unless obj
     k = keys.shift
     result = obj.respond_to?(k) ? obj.send(k) : obj[k]
     keys.empty? ? result : recurse(result, keys)
+  end
+
+  # --- PKCE Support Added ---
+  #
+  # Override request_phase to generate a PKCE code_verifier and code_challenge.
+  # The code_verifier is stored in the session for later use during token exchange.
+  # The code_challenge and method are added to the authorize URL.
+  def request_phase
+    # Generate a random code_verifier
+    code_verifier = SecureRandom.urlsafe_base64(64)
+    # Compute the code_challenge using SHA256 and Base64 URL-safe encoding (remove trailing '=')
+    code_challenge = Base64.urlsafe_encode64(OpenSSL::Digest::SHA256.digest(code_verifier)).delete("=")
+    
+    # Store the code_verifier in the session (for later token exchange)
+    session["oauth2_code_verifier"] = code_verifier
+    
+    # Ensure authorize_params is a hash and add PKCE parameters
+    options.authorize_params ||= {}
+    options.authorize_params[:code_challenge] = code_challenge
+    options.authorize_params[:code_challenge_method] = "S256"
+    
+    super
   end
 end
